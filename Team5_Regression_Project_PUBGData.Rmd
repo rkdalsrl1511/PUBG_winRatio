@@ -1,0 +1,916 @@
+---
+title: "Team5_Regression_Project_PUBGData"
+author: "junseung"
+date: "2019년 1월 28일"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE, tidy = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(knitr)
+hook_output <- knit_hooks$get("output")
+knit_hooks$set(output = function(x, options) {
+  lines <- options$output.lines
+  if (is.null(lines)) {
+    return(hook_output(x, options))  # pass to default hook
+  }
+  x <- unlist(strsplit(x, "\n"))
+  more <- "..."
+  if (length(lines)==1) {        # first n lines
+    if (length(x) > lines) {
+      # truncate the output, but add ....
+      x <- c(head(x, lines), more)
+    }
+  } else {
+    x <- c(more, x[lines], more)
+  }
+  # paste these lines together
+  x <- paste(c(x, ""), collapse = "\n")
+  hook_output(x, options)
+})
+``` 
+
+https://pubgtracker.com/profile/pc/baoli6666666?region=agg
+
+
+####약 85,000 명의 Top Ranked Players (<https://pubgtracker.com/>)
+
+####한 시즌의 Player Data, 
+
+####Game Type : Solo, Duo, Squad
+
+
+
+
+###***1. 데이터 분석을 위한 사전 작업***
+
+####**1-1. 필요한 패키지 불러오기**
+
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(lm.beta)
+library(writexl)
+library(gvlma)
+library(car)
+library(Metrics)
+library(png)
+library(RColorBrewer)
+library(corrplot)
+library(glmnet)
+library(caret)
+```
+
+####**1-3. 원본 데이터 불러오기**
+
+```{r}
+PUBG <- read.csv(file = "PUBG_Player_Statistics.csv",
+                 header = TRUE,
+                 stringsAsFactors = TRUE)
+```
+
+
+###***2. 데이터 확인하기***
+
+
+####**2-1. 전체 데이터 확인하기**
+
+```{r message=FALSE, warning=FALSE, output.lines = 1:8}
+head(PUBG)
+```
+
+
+**총 데이터 행의 갯수**
+```{r}
+nrow(PUBG)
+```
+
+
+**총 변수의 갯수**
+```{r}
+ncol(PUBG)
+```
+
+
+####**2-2. 데이터 구조 확인하기**
+
+```{r output.lines = 1:8}
+str(PUBG)
+```
+1. data.frame 구조로 되어있다.
+
+2. player_name 변수만 질적 자료인 factor, 나머지 변수는 모두 양적 자료인 numeric으로 
+   이루어짐
+   
+3. player_name과 tracker_id를 제외한 변수는 총 150개
+   여기서 솔로게임 관련 변수 50개, 듀오 게임 관련 변수 50개, 스쿼드 게임 관련 변수 50개
+   solo_, duo_, squad_ 뒤에 붙는 변수명은 똑같이 겹친다
+
+
+
+####**2-3. 각 변수가 가지는 특징 및 입력오류 확인하기**
+
+각 numeric 변수들의 최소값, 최대값, 평균, 중위수를 데이터 프레임으로 저장한다.
+
+```{r output.lines = 1:8}
+Variable <- c()
+Min      <- c()
+Median   <- c()
+Mean     <- c()
+Max      <- c()
+options(scipen = 100)
+for(i in 3:(ncol(PUBG))){
+  PUBG.summary <- summary(PUBG[ , i])
+  Variable <- c(Variable, colnames(PUBG[i]))
+  Min      <- c(Min, PUBG.summary[1] %>% as.numeric() %>% round(digits = 1))
+  Median   <- c(Median, PUBG.summary[3] %>% as.numeric() %>% round(digits = 1))
+  Mean     <- c(Mean, PUBG.summary[4] %>% as.numeric() %>% round(digits = 1))
+  Max      <- c(Max, PUBG.summary[6] %>% as.numeric() %>% round(digits = 1))
+  PUBG.scale <- data.frame(Variable, Min, Median, Mean, Max)
+}
+PUBG.scale
+```
+
+
+###***3. 변수 가공(제거 및 나누기)***
+
+####**3-1. 값이 겹치는 변수, 모두 0으로 채워진 의미 없는 변수 제거하기**
+
+총 12개의 변수를 제거한다
+
+```{r}
+PUBG <- PUBG %>% dplyr::select(-c(tracker_id, solo_RevivesPg,
+                                  solo_TeamKillsPg, solo_TeamKills,
+                                  solo_WeaponAcquired, solo_MostSurvivalTime,
+                                  solo_Revives, solo_DBNOs,
+                                  duo_WeaponAcquired, duo_MostSurvivalTime,
+                                  squad_WeaponAcquired, squad_MostSurvivalTime))
+```
+
+####**3-2. 변수들끼리의 조합으로 새롭게 만들어진 변수를 제거하기**
+
+총 46개의 변수를 제거한다
+
+```{r}
+PUBG <- PUBG %>% dplyr::select(-c(solo_KillDeathRatio, solo_WinTop10Ratio,
+                                  solo_Top10Ratio, solo_DamagePg,
+                                  solo_HeadshotKillsPg, solo_HealsPg,
+                                  solo_KillsPg, solo_MoveDistancePg,
+                                  solo_RoadKillsPg, solo_TimeSurvivedPg,
+                                  solo_Top10sPg, solo_HeadshotKillRatio,
+                                  solo_DailyKills, solo_WeeklyKills,
+                                  duo_KillDeathRatio, duo_WinTop10Ratio,
+                                  duo_Top10Ratio, duo_DamagePg,
+                                  duo_HeadshotKillsPg, duo_HealsPg,
+                                  duo_KillsPg, duo_MoveDistancePg,
+                                  duo_RevivesPg, duo_RoadKillsPg,
+                                  duo_TeamKillsPg, duo_TimeSurvivedPg,
+                                  duo_Top10sPg, duo_HeadshotKillRatio,
+                                  duo_DailyKills, duo_WeeklyKills,
+                                  squad_KillDeathRatio, squad_WinTop10Ratio,
+                                  squad_Top10Ratio, squad_DamagePg,
+                                  squad_HeadshotKillsPg, squad_HealsPg,
+                                  squad_KillsPg, squad_MoveDistancePg,
+                                  squad_RevivesPg, squad_RoadKillsPg,
+                                  squad_TeamKillsPg, squad_TimeSurvivedPg,
+                                  squad_Top10sPg, squad_HeadshotKillRatio,
+                                  squad_DailyKills, squad_WeeklyKills))
+```
+
+**제거 된 후 총 변수의 갯수**
+
+```{r}
+ncol(PUBG)
+```
+
+####**3-3. solo, duo, squad로 데이터 나누기**
+
+```{r}
+PUBG.solo <- PUBG %>% 
+  dplyr::select(contains("solo"))
+
+PUBG.duo <- PUBG %>% 
+  dplyr::select(contains("duo"))
+
+PUBG.squad <- PUBG %>% 
+  dplyr::select(contains("squad"))
+
+```
+
+**솔로 데이터 변수의 갯수**
+
+```{r}
+ncol(PUBG.solo)
+```
+
+**듀오 데이터 변수의 갯수**
+
+```{r}
+ncol(PUBG.duo)
+```
+
+**스쿼드 데이터 변수의 갯수**
+
+```{r}
+ncol(PUBG.squad)
+```
+
+###***4. EDA***
+
+####**4-1. Histogram**
+
+#####**4-1-1. solo에 대한 Histogram**
+
+```{r}
+par(mfrow = c(2, 2))
+for(i in 1:8){
+  hist(PUBG.solo[ , i], 
+       main = colnames(PUBG.solo)[i],
+       xlim = c(min(PUBG.solo[ , i]), max(PUBG.solo[ , i])),
+       xlab = colnames(PUBG.solo)[i],
+       breaks = 100)
+}
+```
+
+#####**4-1-2. duo에 대한 Histogram**
+
+```{r}
+par(mfrow = c(2, 2))
+for(i in 1:8){
+  hist(PUBG.duo[ , i], 
+       main = colnames(PUBG.duo)[i],
+       xlim = c(min(PUBG.duo[ , i]), max(PUBG.duo[ , i])),
+       xlab = colnames(PUBG.duo)[i],
+       breaks = 100)
+}
+```
+
+#####**4-1-3. squad에 대한 Histogram**
+
+```{r}
+par(mfrow = c(2, 2))
+for(i in 1:8){
+  hist(PUBG.squad[ , i], 
+       main = colnames(PUBG.squad)[i],
+       xlim = c(min(PUBG.squad[ , i]), max(PUBG.squad[ , i])),
+       xlab = colnames(PUBG.squad)[i],
+       breaks = 100)
+}
+```
+
+####**4-2. Boxplot**
+
+#####**4-2-1. solo에 대한 Boxplot**
+
+```{r}
+par(mfrow = c(2, 2))
+for(i in 1:8){
+  boxplot(PUBG.solo[ , i], 
+          main = colnames(PUBG.solo)[i])
+}
+```
+
+#####**4-2-2. duo에 대한 Boxplot**
+
+```{r}
+par(mfrow = c(2, 2))
+for(i in 1:8){
+  boxplot(PUBG.duo[ , i], 
+          main = colnames(PUBG.duo)[i])
+}
+```
+
+#####**4-2-3. squad에 대한 Boxplot**
+
+```{r}
+par(mfrow = c(2, 2))
+for(i in 1:8){
+  boxplot(PUBG.squad[ , i], 
+          main = colnames(PUBG.squad)[i])
+}
+```
+
+####**4-3. 변수들 간의 상관관계 확인**
+
+**솔로 변수들 간의 상관관계**
+```{r fig.width= 10, fig.height = 10}
+
+col1 <- colorRampPalette(c("white", "#9B1003"))
+
+cor.solo <- cor(PUBG.solo)
+corrplot(cor.solo,
+         method = "color",
+         number.cex = .7,
+         col = col1(100),
+         tl.col = "black",
+         diag = FALSE,
+         addCoef.col = "white",
+         order = "AOE")
+```
+
+**듀오 변수들 간의 상관관계**
+
+```{r fig.width= 10, fig.height = 10}
+cor.duo <- cor(PUBG.duo)
+corrplot(cor.duo,
+         method = "color",
+         number.cex = .7,
+         col = col1(100),
+         tl.col = "black",
+         diag = FALSE,
+         addCoef.col = "white",
+         order = "AOE")
+```
+
+**스쿼드 변수들 간의 상관관계**
+
+```{r fig.width= 10, fig.height = 10}
+cor.squad <- cor(PUBG.squad)
+corrplot(cor.squad,
+         method = "color",
+         number.cex = .7,
+         col = col1(100),
+         tl.col = "black",
+         diag = FALSE,
+         addCoef.col = "white",
+         order = "AOE")
+```
+
+####**4-4. 핵이라 판단되는 유저 데이터 다루기 **
+
+#####**4-4-1. 첫번 째 도메인 지식**
+
+게임에서 라운드 수 30판 이상인데 헤드샷 킬 비율이 40% 이상인 사람
+
+프로게이머 수준의 랭커도 판수가 올라감에 따라 헤드샷 킬 비율이 30%를 넘기기 힘듬
+
+핵을 쓰는 유저로 간주
+
+**해당 핵 유저를 뽑아오기**
+
+```{r}
+nuclear.player1 <- PUBG %>% 
+  dplyr::filter(((solo_RoundsPlayed >= 30) & (round(solo_HeadshotKills / solo_Kills, digits = 2) >= 0.4)) | ((duo_RoundsPlayed >= 30) & (round(duo_HeadshotKills / duo_Kills, digits = 2) >= 0.4)) | ((squad_RoundsPlayed >= 30) & (round(squad_HeadshotKills / squad_Kills, digits = 2) >= 0.4)))
+```
+
+**첫번째 기준에 해당하는 핵 유저 수 **
+
+```{r}
+nrow(nuclear.player1)
+```
+
+
+**첫 번째 기준의 핵 유저 플레이어를 뺀 데이터 셋 만들기**
+
+**%ni%를 함수는 포함되지 않는 함수를 정의한다** 
+
+```{r}
+'%ni%' <- Negate('%in%') 
+nuclear.player1$player_name <- as.vector(nuclear.player1$player_name)
+PUBG.pure <- PUBG[PUBG$player_name %ni% nuclear.player1$player_name, ]
+```
+
+**PUBG.pure 데이터의 행의 갯수**
+
+```{r}
+nrow(PUBG.pure)
+```
+
+#####**4-4-2. 두번째 도메인 지식**
+
+게임에서 라운드 수 5판 이상인데 킬/데스 비율이 20 이상인 사람
+
+판수가 5판 이상인데도 비정상적으로 킬데스 비율이 높으면 
+
+핵 유저로 의심 
+
+**해당 핵 유저를 뽑아오기**  
+
+losses가 0인 값을 1로 변환해 주어야 한다.
+
+그래야 분모가 0이 되는 것을 방지할 수 있다.
+
+PUBG.pure 데이터에 임시로 이 변수를 저장해둔다.
+
+```{r}
+PUBG.pure$solo_Losses.1 <- ifelse(PUBG.pure$solo_Losses == 0, 1, PUBG.pure$solo_Losses)
+PUBG.pure$duo_Losses.1 <- ifelse(PUBG.pure$duo_Losses == 0, 1, PUBG.pure$duo_Losses)
+PUBG.pure$squad_Losses.1 <- ifelse(PUBG.pure$squad_Losses == 0, 1, PUBG.pure$squad_Losses)
+```
+
+**해당 핵 유저를 뽑아오기**
+
+```{r}
+nuclear.player2 <- PUBG.pure %>% 
+ dplyr::filter(((solo_RoundsPlayed >= 5) & (solo_Kills/solo_Losses.1 >= 20)) | ((duo_RoundsPlayed >= 5) & (duo_Kills/duo_Losses.1 >= 20)) | ((squad_RoundsPlayed >= 5) & (squad_Kills/squad_Losses.1 >= 20)))
+```
+
+**두번째 기준에 해당하는 핵 유저 수 **
+
+```{r}
+nrow(nuclear.player2)
+```
+
+**두번때 기준의 핵 유저 플레이어를 뺀 데이터 셋 만들기**
+
+```{r}
+nuclear.player2$player_name <- as.vector(nuclear.player2$player_name)
+PUBG.pure <- PUBG.pure[PUBG.pure$player_name %ni% nuclear.player2$player_name, ]
+```
+
+**PUBG.pure 데이터의 행의 갯수**
+
+```{r}
+nrow(PUBG.pure)
+```
+
+**임시로 저장했던 변수들을 다시 제거**
+
+```{r}
+PUBG.pure <- PUBG.pure %>% 
+  dplyr::select(-c(solo_Losses.1, duo_Losses.1, squad_Losses.1))
+```
+
+#####**4-4-3. 정제한 데이터를 가지고 솔로, 듀오, 스쿼드 나누기**
+
+```{r}
+PUBG.solo.pure <- PUBG.pure %>% dplyr::select(contains("solo"))
+PUBG.duo.pure <- PUBG.pure %>% dplyr::select(contains("duo"))
+PUBG.squad.pure <- PUBG.pure %>% dplyr::select(contains("squad"))
+```
+
+
+####**4-5. 승률이 0인 유저 제외 **
+
+승률이 0인 사람들은 자신의 승률을 궁금해 하지 않는다
+
+따라서 치킨을 한번이라도 먹어본 사람들의 승률을 예측하기로 함
+
+```{r}
+PUBG.solo.data <- PUBG.solo.pure %>% dplyr::filter(solo_WinRatio > 0) 
+PUBG.duo.data <- PUBG.duo.pure %>% dplyr::filter(duo_WinRatio > 0) 
+PUBG.squad.data <- PUBG.squad.pure %>% dplyr::filter(squad_WinRatio > 0) 
+```
+
+**최종 데이터 갯수 확인하기**
+
+```{r}
+nrow(PUBG.solo.data)
+nrow(PUBG.duo.data)
+nrow(PUBG.squad.data)
+```
+
+###***5. 분석을 위한 데이터셋 만들기***
+
+####***5-1. train set, test set 나누기***
+
+**solo**
+```{r}
+set.seed(seed = 123)
+
+index <- sample(1:2,
+                size = nrow(PUBG.solo.data),
+                replace = TRUE,
+                prob = c(0.7, 0.3))
+solo.trainSet <- PUBG.solo.data[index == 1, ]
+solo.testSet <- PUBG.solo.data[index == 2, ]
+```
+
+**duo**
+```{r}
+set.seed(seed = 1234)
+
+index <- sample(1:2,
+                size = nrow(PUBG.duo.data),
+                replace = TRUE,
+                prob = c(0.7, 0.3))
+duo.trainSet <- PUBG.duo.data[index == 1, ]
+duo.testSet <- PUBG.duo.data[index == 2, ]
+```
+
+**squad**
+```{r}
+set.seed(seed = 12345)
+
+index <- sample(1:2,
+                size = nrow(PUBG.squad.data),
+                replace = TRUE,
+                prob = c(0.7, 0.3))
+squad.trainSet <- PUBG.squad.data[index == 1, ]
+squad.testSet <- PUBG.squad.data[index == 2, ]
+```
+
+###***6. 회귀분석***
+
+####***6-1. 솔로 게임 회귀분석***
+
+#####***6-1-1. 모든 변수를 다 넣고 회귀분석**
+
+```{r}
+fit.solo.all <- lm(solo_WinRatio ~., 
+                   data = solo.trainSet)
+
+summary(fit.solo.all)
+```
+
+**승률을 -로 예측하는 것을 0으로 바꿔 예측**
+
+```{r}
+pred.solo.all <- ifelse(predict(fit.solo.all, solo.testSet) < 0, 
+                        0,
+                        predict(fit.solo.all, solo.testSet))
+```
+
+**rmse값 구하기**
+
+```{r}
+rmse(solo.testSet$solo_WinRatio,
+     pred.solo.all)
+```
+
+#####***6-1-2. stepwise, 다중공선성 제거 후 회귀분석**
+
+**stepwise를 both로 설정하고, 유의하지 않은 변수를 제거하고, 다중공선성이 10이 넘는 변수를 자동으로 제거하는 함수를 만듬
+
+```{r}
+new.model.func <- function(dataset,
+                           target.variable){
+  
+  result <- lm(dataset[,target.variable] ~.,
+               data = dataset %>%
+                 dplyr::select(-contains(target.variable)))
+  
+  return(result)
+  
+}
+
+Normal.regression <- function(dataset,
+                              target.variable,
+                              stepwise.option = FALSE){
+  
+  new.model <- new.model.func(dataset, target.variable)
+  
+  if(stepwise.option == TRUE){
+    
+    normal.step <- step(new.model,
+                        direction = "both")
+    
+    newdataset <- dataset %>% dplyr::select(contains(target.variable),
+                                            names(normal.step$coefficients[-1]))
+
+    new.model <- new.model.func(newdataset, target.variable)
+    
+  }else{
+    
+    normal <- summary(new.model)
+    
+    newdataset <- dataset %>% dplyr::select(contains(target.variable),
+                                            rownames(normal$coefficients[normal$coefficients[, 4] <= 0.05, ])[-1])
+
+    new.model <- new.model.func(newdataset, target.variable)
+    
+  }
+  
+  newdataset <- newdataset %>% dplyr::select(contains(target.variable),
+                                             names(vif(new.model)[vif(new.model)<10]))
+  
+  new.model <- new.model.func(newdataset, target.variable)
+  
+  normal <- summary(new.model)
+  
+  newdataset <- dataset %>% dplyr::select(contains(target.variable),
+                                          rownames(normal$coefficients[normal$coefficients[, 4] <= 0.05, ])[-1])
+  
+  new.model <- new.model.func(newdataset, target.variable)
+  
+  return(new.model)
+  
+}
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+fit.solo.step <- Normal.regression(dataset = solo.trainSet,
+                                   target.variable = "solo_WinRatio",
+                                   stepwise.option = TRUE)
+```
+
+```{r}
+summary(fit.solo.step)
+```
+
+**승률을 -로 예측하는 것을 0으로 바꿔 예측**
+
+```{r}
+pred.solo.step <- ifelse(predict(fit.solo.step, solo.testSet) < 0, 
+                        0,
+                        predict(fit.solo.step, solo.testSet))
+```
+
+**rmse값 구하기**
+
+```{r}
+rmse(solo.testSet$solo_WinRatio,
+     pred.solo.step)
+```
+
+#####***6-1-3. Ridge, Lasso grid search **
+
+**RMSE를 최소로 하는 ALPHA(람다) 값을 출력하는 함수를 만듬**
+
+```{r}
+x <- model.matrix(solo_WinRatio ~ ., solo.trainSet)[, -1]
+y <- solo.trainSet$solo_WinRatio
+z <- model.matrix(solo_WinRatio ~ ., solo.testSet)[, -1]
+
+a <- c(seq(0,1,0.1))
+rmse <- c()
+alpha <- c()
+
+for(i in a){
+  ridge.lasso.solo <- cv.glmnet(x, y, alpha = i)
+  lasso.coef <- predict(ridge.lasso.solo, type = "coefficients", s = ridge.lasso.solo$lambda.min)
+  pred.solo.ridge.lasso <- ifelse(predict(ridge.lasso.solo, s = ridge.lasso.solo$lambda.min, newx = z) < 0, 0, predict(ridge.lasso.solo, s = ridge.lasso.solo$lambda.min, newx = z))
+  rmse <- c(rmse, RMSE(solo.testSet$solo_WinRatio, pred.solo.ridge.lasso))
+  alpha <- c(alpha, i)
+  grid.solo <- data.frame(RMSE = rmse,
+                     ALPHA = alpha)
+}
+```
+
+**RMSE와 ALPHA를 표로 출력**
+
+```{r}
+grid.solo
+```
+
+
+####***6-2. 듀오 게임 회귀분석***
+
+#####***6-2-1. 모든 변수를 다 넣고 회귀분석**
+
+```{r}
+fit.duo.all <- lm(duo_WinRatio ~., 
+                  data = duo.trainSet)
+
+summary(fit.duo.all)
+```
+
+**승률을 -로 예측하는 것을 0으로 바꿔 예측**
+
+```{r}
+pred.duo.all <- ifelse(predict(fit.duo.all, duo.testSet) < 0, 
+                       0,
+                       predict(fit.duo.all, duo.testSet))
+```
+
+**rmse값 구하기**
+
+```{r}
+rmse(duo.testSet$duo_WinRatio,
+     pred.duo.all)
+```
+
+#####***6-2-2. stepwise, 다중공선성 제거 후 회귀분석**
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+fit.duo.step <- Normal.regression(dataset = duo.trainSet,
+                                   target.variable = "duo_WinRatio",
+                                   stepwise.option = TRUE)
+```
+
+```{r}
+summary(fit.duo.step)
+```
+
+**승률을 -로 예측하는 것을 0으로 바꿔 예측**
+
+```{r}
+pred.duo.step <- ifelse(predict(fit.duo.step, duo.testSet) < 0, 
+                        0,
+                        predict(fit.duo.step, duo.testSet))
+```
+
+**rmse값 구하기**
+
+```{r}
+rmse(duo.testSet$duo_WinRatio,
+     pred.duo.step)
+```
+
+#####***6-2-3. Ridge, Lasso grid search **
+
+**RMSE를 최소로 하는 ALPHA(람다) 값을 출력하는 함수를 만듬**
+
+```{r}
+x <- model.matrix(duo_WinRatio ~ ., duo.trainSet)[, -1]
+y <- duo.trainSet$duo_WinRatio
+z <- model.matrix(duo_WinRatio ~ ., duo.testSet)[, -1]
+
+a <- c(seq(0,1,0.1))
+rmse <- c()
+alpha <- c()
+
+for(i in a){
+  ridge.lasso.duo <- cv.glmnet(x, y, alpha = i)
+  lasso.coef <- predict(ridge.lasso.duo, type = "coefficients", s = ridge.lasso.duo$lambda.min)
+  pred.duo.ridge.lasso <- ifelse(predict(ridge.lasso.duo, s = ridge.lasso.duo$lambda.min, newx = z) < 0, 0, predict(ridge.lasso.duo, s = ridge.lasso.duo$lambda.min, newx = z))
+  rmse <- c(rmse, RMSE(duo.testSet$duo_WinRatio, pred.duo.ridge.lasso))
+  alpha <- c(alpha, i)
+  grid.duo <- data.frame(RMSE = rmse,
+                         ALPHA = alpha)
+}
+```
+
+**RMSE와 ALPHA를 표로 출력**
+
+```{r}
+grid.duo
+```
+
+####***6-3. 스쿼드 게임 회귀분석***
+
+#####***6-3-1. 모든 변수를 다 넣고 회귀분석**
+
+```{r}
+fit.squad.all <- lm(squad_WinRatio ~., 
+                    data = squad.trainSet)
+
+summary(fit.squad.all)
+```
+
+**승률을 -로 예측하는 것을 0으로 바꿔 예측**
+
+```{r}
+pred.squad.all <- ifelse(predict(fit.squad.all, squad.testSet) < 0, 
+                         0,
+                         predict(fit.squad.all, squad.testSet))
+```
+
+**rmse값 구하기**
+
+```{r}
+rmse(squad.testSet$squad_WinRatio,
+     pred.squad.all)
+```
+
+#####***6-3-2. stepwise, 다중공선성 제거 후 회귀분석**
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+fit.squad.step <- Normal.regression(dataset = squad.trainSet,
+                                    target.variable = "squad_WinRatio",
+                                    stepwise.option = TRUE)
+```
+
+```{r}
+summary(fit.squad.step)
+```
+
+**승률을 -로 예측하는 것을 0으로 바꿔 예측**
+
+```{r}
+pred.squad.step <- ifelse(predict(fit.squad.step, squad.testSet) < 0, 
+                          0,
+                          predict(fit.squad.step, squad.testSet))
+```
+
+**rmse값 구하기**
+
+```{r}
+rmse(squad.testSet$squad_WinRatio,
+     pred.squad.step)
+```
+
+
+#####***6-3-3. Ridge, Lasso grid search **
+
+**RMSE를 최소로 하는 ALPHA(람다) 값을 출력하는 함수를 만듬**
+
+```{r}
+x <- model.matrix(squad_WinRatio ~ ., squad.trainSet)[, -1]
+y <- squad.trainSet$squad_WinRatio
+z <- model.matrix(squad_WinRatio ~ ., squad.testSet)[, -1]
+
+a <- c(seq(0,1,0.1))
+rmse <- c()
+alpha <- c()
+
+for(i in a){
+  ridge.lasso.squad <- cv.glmnet(x, y, alpha = i)
+  lasso.coef <- predict(ridge.lasso.squad, type = "coefficients", s = ridge.lasso.squad$lambda.min)
+  pred.squad.ridge.lasso <- ifelse(predict(ridge.lasso.squad, s = ridge.lasso.squad$lambda.min, newx = z) < 0, 0, predict(ridge.lasso.squad, s = ridge.lasso.squad$lambda.min, newx = z))
+  rmse <- c(rmse, RMSE(squad.testSet$squad_WinRatio, pred.squad.ridge.lasso))
+  alpha <- c(alpha, i)
+  grid.squad <- data.frame(RMSE = rmse,
+                         ALPHA = alpha)
+}
+```
+
+**RMSE와 ALPHA를 표로 출력**
+
+```{r}
+grid.squad
+```
+
+###***7. 최종 모델 선정***
+
+
+|        Method         |  Data   | RMSE  | Alpha |
+| :-------------------: | :-----: | :---: | :---: |
+|     fit.solo.all      | "Solo"  | 7.425 |       |
+|     fit.solo.step     | "Solo"  | 8.216 |       |
+| fit.solo.ridge.lasso  | "Solo"  | 7.431 |  0.9  |
+|      fit.duo.all      |  "Duo"  | 3.855 |       |
+|     fit.duo.step      |  "Duo"  | 4.006 |       |
+|  fit.duo.ridge.lasso  |  "Duo"  | 3.857 |  0.2  |
+|     fit.squad.all     | "Squad" | 3.514 |       |
+|    fit.squad.step     | "Squad" | 4.544 |       |
+| fit.squad.ridge.lasso | "Squad" | 3.515 |  0.2  |
+
+
+**솔로의 추정치**
+
+```{r}
+x <- model.matrix(solo_WinRatio ~ ., solo.trainSet)[, -1]
+y <- solo.trainSet$solo_WinRatio
+z <- model.matrix(solo_WinRatio ~ ., solo.testSet)[, -1]
+
+PUBG.solo.lasso <- cv.glmnet(x, y, alpha = 0.9)                  
+lasso.solo.coef <- predict(PUBG.solo.lasso, type = "coefficients", s = PUBG.solo.lasso$lambda.min)            
+lasso.solo.coef
+```
+
+**듀오의 추정치**
+
+```{r}
+x <- model.matrix(duo_WinRatio ~ ., duo.trainSet)[, -1]
+y <- duo.trainSet$duo_WinRatio
+z <- model.matrix(duo_WinRatio ~ ., duo.testSet)[, -1]
+
+PUBG.duo.lasso <- cv.glmnet(x, y, alpha = 0.2)                  
+lasso.duo.coef <- predict(PUBG.duo.lasso, type = "coefficients", s = PUBG.duo.lasso$lambda.min)            
+lasso.duo.coef
+```
+
+**스쿼드의 추정치**
+
+```{r}
+x <- model.matrix(squad_WinRatio ~ ., squad.trainSet)[, -1]
+y <- squad.trainSet$squad_WinRatio
+z <- model.matrix(squad_WinRatio ~ ., squad.testSet)[, -1]
+
+PUBG.squad.lasso <- cv.glmnet(x, y, alpha = 0.2)                  
+lasso.squad.coef <- predict(PUBG.squad.lasso, type = "coefficients", s = PUBG.squad.lasso$lambda.min)            
+lasso.squad.coef
+```
+
+| "**Solo**"           |                 |
+| -------------------- | --------------- |
+| ***Positive***       | +               |
+| solo_RoundsPlayed    | 0.071439675449  |
+| solo_Losses          | 0.010386000806  |
+| solo_Assists         | 0.012908164666  |
+| solo_Suicides        | 0.032994995527  |
+| solo_VehicleDestroys | 0.014411862533  |
+| solo_RoundMostKills  | 0.499964323817  |
+| solo_AvgSurvivalTime | 0.022178727637  |
+| ***Negative***       | -               |
+| solo_Top10s          | -0.139590724111 |
+| solo_Kills           | -0.020633761489 |
+| solo_MaxKillStreaks  | -0.168387066799 |
+| solo_Days            | -0.089411890795 |
+
+| **"Duo"**           |                     |
+| ------------------- | ------------------- |
+| ***Positive***      | +                   |
+| duo_RoundsPlayed    | 0.0212392310521666  |
+| duo_Losses          | 0.0253297307679233  |
+| duo_Suicides        | 0.0155768618745574  |
+| duo_VehicleDestroys | 0.0323545203309150  |
+| duo_RoundMostKills  | 0.2763732902454243  |
+| duo_AvgSurvivalTime | 0.0110660911618265  |
+| ***Negative***      | -                   |
+| duo_Top10s          | -0.0404900733413365 |
+| duo_BestRating      | -0.0115672809854515 |
+| duo_Kills           | -0.0157855084514506 |
+| duo_Assists         | -0.0177981660690732 |
+| duo_MaxKillStreaks  | -0.1109156838781767 |
+| duo_Days            | -0.0902909884257877 |
+
+| "Squad"              |                 |
+| -------------------- | --------------- |
+| ***Positive***       | +               |
+| squad_RoundMostKills | 0.277577820491  |
+| squad_Suicides       | 0.026280624898  |
+| ***Negative***       | -               |
+| squad_MaxKillStreaks | -0.196542101487 |
+| squad_Days           | -0.073053062836 |
+| squad_Top10s         | -0.022695739150 |
+| squad_Assists        | -0.013933854213 |
+| squad_RoadKills      | -0.017817237725 |
+
+
